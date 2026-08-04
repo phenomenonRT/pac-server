@@ -153,6 +153,42 @@ JSON
   fi
 }
 
+port_from_config() {
+  if [ -f "$CONFIG_DIR/config.json" ]; then
+    grep -o '"listen_port"[[:space:]]*:[[:space:]]*[0-9]*' "$CONFIG_DIR/config.json" \
+      | head -n1 | grep -o '[0-9]*$'
+  fi
+}
+
+# Открывает доступ к порту pac-server только с loopback (lo) и LAN-моста (br0),
+# WAN не трогает. Работает только там, где есть uci (OpenWrt / Keenetic NDMS uci-shim).
+install_openwrt_firewall() {
+  if ! command -v uci >/dev/null 2>&1; then
+    return
+  fi
+
+  port="$(port_from_config)"
+  if [ -z "${port:-}" ]; then
+    port=81
+  fi
+
+  for entry in "pac_server_lo:lo" "pac_server_lan:br0"; do
+    name="${entry%%:*}"
+    dev="${entry#*:}"
+    uci set firewall."$name"="rule"
+    uci set firewall."$name".name="PAC Server ($dev)"
+    uci set firewall."$name".target='ACCEPT'
+    uci set firewall."$name".proto='tcp'
+    uci set firewall."$name".dest_port="$port"
+    uci set firewall."$name".device="$dev"
+    uci set firewall."$name".direction='in'
+  done
+
+  uci commit firewall
+  /etc/init.d/firewall reload >/dev/null 2>&1 || true
+  echo "Firewall: открыт TCP/$port для интерфейсов lo и br0 (WAN не тронут)"
+}
+
 main() {
   need_root
   target="$(detect_target)"
@@ -186,11 +222,13 @@ main() {
     systemctl status pac-server --no-pager || true
   elif [ -f /etc/openwrt_release ] && [ -d /etc/init.d ]; then
     install_openwrt_service
+    install_openwrt_firewall
     "$OPENWRT_SERVICE_FILE" enable
     "$OPENWRT_SERVICE_FILE" restart
     echo "OpenWrt service installed: $OPENWRT_SERVICE_FILE"
   elif [ -d /opt/etc/init.d ]; then
     install_entware_service
+    install_openwrt_firewall
     "$ENTWARE_SERVICE_FILE" start || true
     echo "Entware service installed: $ENTWARE_SERVICE_FILE"
   else
