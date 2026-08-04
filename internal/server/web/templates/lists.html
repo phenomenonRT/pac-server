@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Списки доменов</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  {{ template "header" . }}
+
+  <main class="page">
+    <section class="child-window">
+      <div class="panel-title">
+        <h1>Загрузка списков</h1>
+        <span>отдельное окно для v2fly domain-list-community</span>
+      </div>
+
+      {{ template "alerts" . }}
+
+      <form method="get" action="/lists/load" class="form-grid compact">
+        <label class="wide">
+          <span>Имя списка <b class="help" title="Имя файла из каталога v2fly data: google, telegram, youtube, category-ads-all и т.д.">?</b></span>
+          <input name="list" placeholder="google" value="{{ .Loaded.Name }}">
+        </label>
+        <div class="form-footer">
+          <button class="primary-button" type="submit">Загрузить</button>
+        </div>
+      </form>
+
+      {{ if .Loaded.Name }}
+      <section class="loaded-list">
+        <div class="panel-title">
+          <h2>{{ .Loaded.Name }}</h2>
+          <span>{{ .Loaded.Count }} доменов</span>
+        </div>
+        <a class="secondary-button" href="{{ .Loaded.RawURL }}" target="_blank" rel="noreferrer">Открыть raw файл</a>
+
+        <form method="post" action="/lists/import" class="form-grid compact">
+          <input type="hidden" name="v2fly_list" value="{{ .Loaded.Name }}">
+          <label>
+            <span>PAC файл <b class="help" title="Выбери профиль, куда добавить домены из загруженного списка.">?</b></span>
+            <select name="profile_slug">
+              {{ range .Profiles }}
+              <option value="{{ .Slug }}">{{ .Name }} (/pac/{{ .Slug }}.pac)</option>
+              {{ end }}
+            </select>
+          </label>
+          <label>
+            <span>Куда добавить <b class="help" title="PROXY домены будут идти через proxy, DIRECT домены будут идти напрямую.">?</b></span>
+            <select name="import_target">
+              <option value="proxy">PROXY домены</option>
+              <option value="direct">DIRECT домены</option>
+            </select>
+          </label>
+          <div class="form-footer">
+            <button class="primary-button" type="submit">Добавить в PAC</button>
+          </div>
+        </form>
+
+        <div class="domain-preview">
+          {{ range .Loaded.Preview }}
+          <span>{{ . }}</span>
+          {{ end }}
+        </div>
+      </section>
+      {{ end }}
+    </section>
+
+    <section class="child-window" id="catalog">
+      <div class="panel-title">
+        <h2>Списки со ссылками</h2>
+        <span>быстрые ссылки на raw-файлы</span>
+      </div>
+      <div class="list-grid">
+        {{ range .Lists }}
+        <article class="list-card">
+          <h3>{{ .Name }}</h3>
+          <p>{{ .Description }}</p>
+          <div class="card-actions">
+            <a class="secondary-button" href="/lists/load?list={{ .Name }}">Загрузить</a>
+            <a class="secondary-button" href="{{ .RawURL }}" target="_blank" rel="noreferrer">Файл</a>
+          </div>
+        </article>
+        {{ end }}
+      </div>
+    </section>
+  </main>
+</body>
+</html>

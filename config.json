@@ -1,0 +1,21 @@
+{
+  "listen_ip": "127.0.0.1",
+  "listen_port": 81,
+  "profiles": [
+    {
+      "name": "Default",
+      "slug": "default",
+      "proxy_type": "SOCKS5",
+      "proxy_host": "127.0.0.1",
+      "proxy_port": 1080,
+      "proxy": "SOCKS5 127.0.0.1:1080",
+      "fallback": "DIRECT",
+      "direct_domains": [
+        "localhost",
+        "local",
+        "lan"
+      ],
+      "proxy_domains": []
+    }
+  ]
+}

@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PAC Server</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  {{ template "header" . }}
+
+  <main class="page">
+    <section class="titlebar">
+      <div>
+        <h1>PAC файлы</h1>
+        <p>Слушает: <strong>{{ .Config.Address }}</strong></p>
+      </div>
+      <a class="primary-button" href="#new-profile">+ Создать PAC</a>
+    </section>
+
+    {{ template "alerts" . }}
+
+    <nav class="tabs" aria-label="PAC профили">
+      {{ range .Profiles }}
+      <a class="tab" href="#profile-{{ .Slug }}">
+        <span>{{ .Name }}</span>
+        <strong>{{ len .ProxyDomains }}</strong>
+      </a>
+      {{ end }}
+    </nav>
+
+    <section class="toolbar">
+      <p>{{ .ProfileCount }} PAC профилей</p>
+      <div class="toolbar-actions">
+        <a class="secondary-button" href="/api/config">Экспорт</a>
+        <a class="secondary-button" href="{{ .DefaultPAC }}">Открыть default</a>
+      </div>
+    </section>
+
+    <section class="cards">
+      {{ range .Profiles }}
+      <article class="rule-card" id="profile-{{ .Slug }}">
+        <form method="post" action="/profiles/{{ .Slug }}/update">
+          <div class="card-top">
+            <div>
+              <h2><span class="dot"></span>{{ .Name }}</h2>
+              <div class="badges">
+                <span>{{ .Slug }}.pac</span>
+                <span>{{ .Proxy }}</span>
+                <span>{{ .Fallback }}</span>
+              </div>
+            </div>
+            <a class="pac-link" href="{{ .PACURL }}">PAC</a>
+          </div>
+
+          {{ template "profile_form" . }}
+
+          <div class="card-actions">
+            <button class="primary-button" type="submit">Сохранить</button>
+            <a class="secondary-button" href="{{ .PACURL }}">Открыть PAC</a>
+          </div>
+        </form>
+
+        <form method="post" action="/profiles/{{ .Slug }}/delete" class="delete-form">
+          <button class="danger-button" type="submit">Удалить</button>
+        </form>
+      </article>
+      {{ end }}
+    </section>
+
+    <section class="create-panel" id="new-profile">
+      <div class="panel-title">
+        <h2>Новый PAC профиль</h2>
+        <span>домены можно писать с новой строки или через запятую</span>
+      </div>
+
+      <form method="post" action="/profiles" class="form-grid">
+        <label>
+          <span>Название <b class="help" title="Отображаемое имя профиля.">?</b></span>
+          <input name="name" placeholder="Work" required>
+        </label>
+        <label>
+          <span>Имя файла <b class="help" title="Будущий URL будет /pac/имя.pac. Если оставить пустым, имя файла сделается из названия.">?</b></span>
+          <input name="slug" placeholder="work" pattern="[a-zA-Z0-9_-]+">
+        </label>
+        <label>
+          <span>Тип <b class="help" title="SOCKS5/SOCKS для socks-прокси, PROXY для HTTP proxy, HTTPS для HTTPS proxy, DIRECT без proxy.">?</b></span>
+          <select name="proxy_type">
+            <option value="SOCKS5">SOCKS5</option>
+            <option value="SOCKS">SOCKS</option>
+            <option value="PROXY">PROXY</option>
+            <option value="HTTPS">HTTPS</option>
+            <option value="DIRECT">DIRECT</option>
+          </select>
+        </label>
+        <label>
+          <span>Fallback <b class="help" title="DIRECT — неизвестные сайты напрямую. PROXY — неизвестные сайты через proxy.">?</b></span>
+          <select name="fallback">
+            <option value="DIRECT">DIRECT</option>
+            <option value="PROXY">PROXY</option>
+          </select>
+        </label>
+        <label>
+          <span>Proxy IP/host <b class="help" title="Адрес proxy-сервера без порта.">?</b></span>
+          <input name="proxy_host" value="127.0.0.1">
+        </label>
+        <label>
+          <span>Proxy порт <b class="help" title="Обычно 1080 для SOCKS5 или 8080 для HTTP proxy.">?</b></span>
+          <input name="proxy_port" type="number" min="0" max="65535" value="1080">
+        </label>
+        <label class="wide">
+          <span>DIRECT домены <b class="help" title="Домены, которые должны идти напрямую.">?</b></span>
+          <textarea name="direct_domains" rows="4" placeholder="localhost&#10;lan"></textarea>
+        </label>
+        <label class="wide">
+          <span>PROXY домены <b class="help" title="Домены, которые должны идти через proxy.">?</b></span>
+          <textarea name="proxy_domains" rows="4" placeholder="example.com&#10;google.com"></textarea>
+        </label>
+        <div class="wide form-footer">
+          <button class="primary-button" type="submit">Создать</button>
+        </div>
+      </form>
+    </section>
+  </main>
+</body>
+</html>

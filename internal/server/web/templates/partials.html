@@ -1,0 +1,75 @@
+{{ define "header" }}
+<header class="app-header">
+  <a class="brand" href="/" aria-label="PAC Server">
+    <span class="brand-mark">P</span>
+    <span class="brand-name">PAC-SERVER</span>
+    <span class="version">v1.2.0</span>
+  </a>
+  <nav class="header-actions" aria-label="Разделы">
+    <a href="/">PAC файлы</a>
+    <a href="/lists">Загрузка</a>
+    <a href="/lists#catalog">Списки</a>
+    <a href="/settings">Настройки</a>
+    <a href="{{ .DefaultPAC }}">proxy.pac</a>
+  </nav>
+</header>
+{{ end }}
+
+{{ define "alerts" }}
+{{ if .Error }}
+<div class="alert error">{{ .Error }}</div>
+{{ end }}
+{{ if .Message }}
+<div class="alert ok">{{ .Message }}</div>
+{{ end }}
+{{ end }}
+
+{{ define "profile_form" }}
+<div class="form-grid">
+  <label>
+    <span>Название <b class="help" title="Отображаемое имя профиля в веб-интерфейсе.">?</b></span>
+    <input name="name" value="{{ .Name }}" required>
+  </label>
+  <label>
+    <span>Имя файла <b class="help" title="Часть URL PAC-файла. Например work даст /pac/work.pac.">?</b></span>
+    <input name="slug" value="{{ .Slug }}" pattern="[a-zA-Z0-9_-]+" required>
+  </label>
+  <label>
+    <span>Тип <b class="help" title="SOCKS5/SOCKS для socks-прокси, PROXY для HTTP-прокси, HTTPS для HTTPS-прокси, DIRECT без прокси.">?</b></span>
+    <select name="proxy_type">
+      <option value="SOCKS5" {{ if eq .ProxyType "SOCKS5" }}selected{{ end }}>SOCKS5</option>
+      <option value="SOCKS" {{ if eq .ProxyType "SOCKS" }}selected{{ end }}>SOCKS</option>
+      <option value="PROXY" {{ if eq .ProxyType "PROXY" }}selected{{ end }}>PROXY</option>
+      <option value="HTTPS" {{ if eq .ProxyType "HTTPS" }}selected{{ end }}>HTTPS</option>
+      <option value="DIRECT" {{ if eq .ProxyType "DIRECT" }}selected{{ end }}>DIRECT</option>
+    </select>
+  </label>
+  <label>
+    <span>Fallback <b class="help" title="Что делать с сайтами, которых нет в списках. DIRECT — напрямую, PROXY — через выбранный proxy.">?</b></span>
+    <select name="fallback">
+      <option value="DIRECT" {{ if eq .Fallback "DIRECT" }}selected{{ end }}>DIRECT</option>
+      <option value="PROXY" {{ if eq .Fallback "PROXY" }}selected{{ end }}>PROXY</option>
+    </select>
+  </label>
+  <label>
+    <span>Proxy IP/host <b class="help" title="Адрес proxy-сервера без порта. Для DIRECT можно оставить пустым.">?</b></span>
+    <input name="proxy_host" value="{{ .ProxyHost }}" placeholder="127.0.0.1">
+  </label>
+  <label>
+    <span>Proxy порт <b class="help" title="Порт proxy-сервера. Например 1080 для SOCKS5 или 8080 для HTTP proxy.">?</b></span>
+    <input name="proxy_port" type="number" min="0" max="65535" value="{{ .ProxyPort }}">
+  </label>
+  <label class="wide">
+    <span>PAC URL <b class="help" title="Этот адрес указывается в системе или браузере как URL автоматической настройки proxy.">?</b></span>
+    <input value="{{ .PACURL }}" readonly>
+  </label>
+  <label class="wide">
+    <span>DIRECT домены <b class="help" title="Домены, которые всегда открываются напрямую, минуя proxy.">?</b></span>
+    <textarea name="direct_domains" rows="4" placeholder="localhost&#10;lan">{{ .DirectText }}</textarea>
+  </label>
+  <label class="wide">
+    <span>PROXY домены <b class="help" title="Домены, которые всегда идут через выбранный proxy.">?</b></span>
+    <textarea name="proxy_domains" rows="4" placeholder="example.com&#10;google.com">{{ .ProxyText }}</textarea>
+  </label>
+</div>
+{{ end }}
