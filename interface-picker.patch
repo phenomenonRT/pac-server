@@ -1,0 +1,207 @@
+--- /tmp/baseline/internal/server/server.go	2026-08-06 04:31:21.769413889 +0000
++++ internal/server/server.go	2026-08-05 19:57:55.559735046 +0000
+@@ -14,6 +14,7 @@
+ 
+ 	"pac-server/internal/config"
+ 	"pac-server/internal/domainlist"
++	"pac-server/internal/netiface"
+ 	"pac-server/internal/pac"
+ )
+ 
+@@ -39,6 +40,7 @@
+ 	ProxyTypes   []string
+ 	Lists        []listEntry
+ 	Loaded       loadedList
++	Interfaces   []netiface.Option
+ }
+ 
+ type profileView struct {
+@@ -104,7 +106,10 @@
+ 
+ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
+ 	if r.Method == http.MethodGet {
+-		s.render(w, r, "settings.html", pageData{})
++		cfg := s.snapshot()
++		s.render(w, r, "settings.html", pageData{
++			Interfaces: netiface.WithCurrent(netiface.List(), cfg.ListenIP),
++		})
+ 		return
+ 	}
+ 	if r.Method != http.MethodPost {
+
+--- /tmp/baseline/internal/server/web/templates/settings.html	2026-08-06 04:31:31.905413951 +0000
++++ internal/server/web/templates/settings.html	2026-08-06 04:26:20.861412047 +0000
+@@ -13,15 +13,20 @@
+     <section class="child-window">
+       <div class="panel-title">
+         <h1>Настройки прослушивания</h1>
+-        <span>выбери IP локальной сети, чтобы не открыть интерфейс через WAN</span>
++        <span>выбери сетевой интерфейс, чтобы не открыть интерфейс через WAN</span>
+       </div>
+ 
+       {{ template "alerts" . }}
+ 
+       <form method="post" action="/settings" class="form-grid compact">
+         <label>
+-          <span>IP интерфейса <b class="help" title="127.0.0.1 доступен только с самого устройства. Для роутера обычно нужен LAN-IP, например 192.168.1.1. Не ставь 0.0.0.0, если не хочешь слушать все интерфейсы, включая WAN.">?</b></span>
+-          <input name="listen_ip" value="{{ .Config.ListenIP }}" placeholder="127.0.0.1" required>
++          <span>Сетевой интерфейс <b class="help" title="Список собран автоматически с этого устройства. 127.0.0.1 доступен только с самого устройства. Для роутера обычно нужен LAN-интерфейс, например 192.168.1.1. Не выбирай 0.0.0.0, если не хочешь слушать все интерфейсы, включая WAN.">?</b></span>
++          <select name="listen_ip" required>
++            {{ $current := .Config.ListenIP }}
++            {{ range .Interfaces }}
++            <option value="{{ .IP }}" {{ if eq .IP $current }}selected{{ end }}>{{ .Label }}</option>
++            {{ end }}
++          </select>
+         </label>
+         <label>
+           <span>Порт <b class="help" title="Порт веб-интерфейса и PAC-ссылок. Порт 81 на Linux/OpenWrt обычно требует запуск от root.">?</b></span>
+
+--- /dev/null
++++ internal/netiface/netiface.go
+@@ -0,0 +1,110 @@
++// Package netiface discovers local network interfaces and their IPv4
++// addresses so the web UI can offer them as a listen-address picker instead
++// of requiring the user to type an IP by hand.
++package netiface
++
++import (
++	"net"
++	"sort"
++)
++
++// Option is a single selectable "listen on this address" choice.
++type Option struct {
++	// Label is shown to the user, e.g. "eth0 (192.168.1.1)".
++	Label string
++	// IP is the value actually stored/used as listen_ip.
++	IP string
++}
++
++// List returns the IPv4 addresses of all up network interfaces, plus a
++// trailing "all interfaces" (0.0.0.0) option. It never returns an error;
++// if interfaces cannot be enumerated it simply returns fewer options.
++func List() []Option {
++	options := make([]Option, 0, 8)
++	seen := make(map[string]struct{})
++
++	ifaces, err := net.Interfaces()
++	if err == nil {
++		for _, iface := range ifaces {
++			if iface.Flags&net.FlagUp == 0 {
++				continue
++			}
++
++			addrs, err := iface.Addrs()
++			if err != nil {
++				continue
++			}
++
++			for _, addr := range addrs {
++				ip := extractIPv4(addr)
++				if ip == "" {
++					continue
++				}
++				if _, ok := seen[ip]; ok {
++					continue
++				}
++				seen[ip] = struct{}{}
++
++				label := iface.Name + " (" + ip + ")"
++				if ip == "127.0.0.1" {
++					label = iface.Name + " (" + ip + ", только это устройство)"
++				}
++				options = append(options, Option{Label: label, IP: ip})
++			}
++		}
++	}
++
++	sort.Slice(options, func(i, j int) bool {
++		if options[i].IP == "127.0.0.1" {
++			return true
++		}
++		if options[j].IP == "127.0.0.1" {
++			return false
++		}
++		return options[i].IP < options[j].IP
++	})
++
++	if _, ok := seen["0.0.0.0"]; !ok {
++		options = append(options, Option{
++			Label: "0.0.0.0 (все интерфейсы, включая WAN)",
++			IP:    "0.0.0.0",
++		})
++	}
++
++	return options
++}
++
++// WithCurrent ensures cfgIP is present in the returned options, adding it
++// (marked as current) when it does not match any detected interface, e.g.
++// after moving a config file between machines.
++func WithCurrent(options []Option, cfgIP string) []Option {
++	for _, opt := range options {
++		if opt.IP == cfgIP {
++			return options
++		}
++	}
++	if cfgIP == "" {
++		return options
++	}
++
++	current := Option{Label: cfgIP + " (текущий, интерфейс не обнаружен)", IP: cfgIP}
++	return append([]Option{current}, options...)
++}
++
++func extractIPv4(addr net.Addr) string {
++	var ip net.IP
++	switch v := addr.(type) {
++	case *net.IPNet:
++		ip = v.IP
++	case *net.IPAddr:
++		ip = v.IP
++	default:
++		return ""
++	}
++
++	ip4 := ip.To4()
++	if ip4 == nil {
++		return ""
++	}
++	return ip4.String()
++}
+
+--- /dev/null
++++ internal/netiface/netiface_test.go
+@@ -0,0 +1,32 @@
++package netiface
++
++import "testing"
++
++func TestListAlwaysIncludesAllInterfacesOption(t *testing.T) {
++	options := List()
++
++	found := false
++	for _, opt := range options {
++		if opt.IP == "0.0.0.0" {
++			found = true
++		}
++	}
++	if !found {
++		t.Fatalf("List() = %#v, want an 0.0.0.0 option", options)
++	}
++}
++
++func TestWithCurrentAddsMissingIP(t *testing.T) {
++	options := WithCurrent(nil, "10.0.0.5")
++	if len(options) != 1 || options[0].IP != "10.0.0.5" {
++		t.Fatalf("WithCurrent() = %#v, want a single 10.0.0.5 option", options)
++	}
++}
++
++func TestWithCurrentKeepsExistingList(t *testing.T) {
++	base := []Option{{Label: "lo (127.0.0.1)", IP: "127.0.0.1"}}
++	options := WithCurrent(base, "127.0.0.1")
++	if len(options) != 1 {
++		t.Fatalf("WithCurrent() = %#v, want unchanged single-option list", options)
++	}
++}

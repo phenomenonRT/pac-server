@@ -14,6 +14,7 @@ import (
 
 	"pac-server/internal/config"
 	"pac-server/internal/domainlist"
+	"pac-server/internal/netiface"
 	"pac-server/internal/pac"
 )
 
@@ -39,6 +40,7 @@ type pageData struct {
 	ProxyTypes   []string
 	Lists        []listEntry
 	Loaded       loadedList
+	Interfaces   []netiface.Option
 }
 
 type profileView struct {
@@ -104,7 +106,10 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
-		s.render(w, r, "settings.html", pageData{})
+		cfg := s.snapshot()
+		s.render(w, r, "settings.html", pageData{
+			Interfaces: netiface.WithCurrent(netiface.List(), cfg.ListenIP),
+		})
 		return
 	}
 	if r.Method != http.MethodPost {
