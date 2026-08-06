@@ -19,15 +19,15 @@
       {{ template "alerts" . }}
 
       <form method="post" action="/settings" class="form-grid compact">
-        <label>
-          <span>Сетевой интерфейс <b class="help" title="Список собран автоматически с этого устройства. 127.0.0.1 доступен только с самого устройства. Для роутера обычно нужен LAN-интерфейс, например 192.168.1.1. Не выбирай 0.0.0.0, если не хочешь слушать все интерфейсы, включая WAN.">?</b></span>
-          <select name="listen_ip" required>
-            {{ $current := .Config.ListenIP }}
-            {{ range .Interfaces }}
-            <option value="{{ .IP }}" {{ if eq .IP $current }}selected{{ end }}>{{ .Label }}</option>
-            {{ end }}
-          </select>
-        </label>
+        <fieldset class="wide interface-list">
+          <legend>Сетевые интерфейсы <b class="help" title="Список собран автоматически с этого устройства. Можно выбрать несколько — сервер откроет отдельный listener на каждом. 127.0.0.1 доступен только с этого устройства. Не выбирай 0.0.0.0, если не хочешь слушать все интерфейсы, включая WAN.">?</b></legend>
+          {{ range .Interfaces }}
+          <label class="checkbox-row">
+            <input type="checkbox" name="listen_ip" value="{{ .IP }}" {{ if index $.SelectedListenIPs .IP }}checked{{ end }}>
+            <span>{{ .Label }}</span>
+          </label>
+          {{ end }}
+        </fieldset>
         <label>
           <span>Порт <b class="help" title="Порт веб-интерфейса и PAC-ссылок. Порт 81 на Linux/OpenWrt обычно требует запуск от root.">?</b></span>
           <input name="listen_port" type="number" min="1" max="65535" value="{{ .Config.ListenPort }}" required>

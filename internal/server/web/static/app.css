@@ -465,6 +465,35 @@ input[readonly] {
   font-family: var(--mono);
 }
 
+.interface-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.interface-list legend {
+  padding: 0 4px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.checkbox-row input[type="checkbox"] {
+  width: auto;
+  min-height: auto;
+}
+
 .help {
   display: inline-grid;
   width: 16px;

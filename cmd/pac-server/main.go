@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -28,22 +29,46 @@ func main() {
 
 	app := server.New(cfg, cfgPath, logger)
 	httpServer := &http.Server{
-		Addr:              cfg.Address(),
 		Handler:           app.Routes(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	go func() {
-		logger.Info("pac server started", "addr", cfg.Address(), "pac", "/proxy.pac")
-		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Error("server stopped", "error", err)
+	addrs := cfg.Addresses()
+	listeners := make([]net.Listener, 0, len(addrs))
+	for _, addr := range addrs {
+		ln, err := net.Listen("tcp", addr)
+		if err != nil {
+			logger.Error("listen", "addr", addr, "error", err)
 			os.Exit(1)
 		}
-	}()
+		listeners = append(listeners, ln)
+	}
+
+	serveErrs := make(chan error, len(listeners))
+	for i, ln := range listeners {
+		addr := addrs[i]
+		ln := ln
+		go func() {
+			logger.Info("pac server started", "addr", addr, "pac", "/proxy.pac")
+			if err := httpServer.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				serveErrs <- err
+				return
+			}
+			serveErrs <- nil
+		}()
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	<-ctx.Done()
+
+	select {
+	case <-ctx.Done():
+	case err := <-serveErrs:
+		if err != nil {
+			logger.Error("server stopped", "error", err)
+			os.Exit(1)
+		}
+	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

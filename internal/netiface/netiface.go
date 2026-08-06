@@ -6,6 +6,7 @@ package netiface
 import (
 	"net"
 	"sort"
+	"strings"
 )
 
 // Option is a single selectable "listen on this address" choice.
@@ -77,18 +78,29 @@ func List() []Option {
 // WithCurrent ensures cfgIP is present in the returned options, adding it
 // (marked as current) when it does not match any detected interface, e.g.
 // after moving a config file between machines.
-func WithCurrent(options []Option, cfgIP string) []Option {
+func WithCurrent(options []Option, cfgIPs []string) []Option {
+	have := make(map[string]struct{}, len(options))
 	for _, opt := range options {
-		if opt.IP == cfgIP {
-			return options
-		}
-	}
-	if cfgIP == "" {
-		return options
+		have[opt.IP] = struct{}{}
 	}
 
-	current := Option{Label: cfgIP + " (текущий, интерфейс не обнаружен)", IP: cfgIP}
-	return append([]Option{current}, options...)
+	missing := make([]Option, 0)
+	for _, cfgIP := range cfgIPs {
+		cfgIP = strings.TrimSpace(cfgIP)
+		if cfgIP == "" {
+			continue
+		}
+		if _, ok := have[cfgIP]; ok {
+			continue
+		}
+		have[cfgIP] = struct{}{}
+		missing = append(missing, Option{Label: cfgIP + " (текущий, интерфейс не обнаружен)", IP: cfgIP})
+	}
+
+	if len(missing) == 0 {
+		return options
+	}
+	return append(missing, options...)
 }
 
 func extractIPv4(addr net.Addr) string {

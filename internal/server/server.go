@@ -31,16 +31,17 @@ type Server struct {
 }
 
 type pageData struct {
-	Config       config.Config
-	Profiles     []profileView
-	Error        string
-	Message      string
-	DefaultPAC   string
-	ProfileCount int
-	ProxyTypes   []string
-	Lists        []listEntry
-	Loaded       loadedList
-	Interfaces   []netiface.Option
+	Config            config.Config
+	Profiles          []profileView
+	Error             string
+	Message           string
+	DefaultPAC        string
+	ProfileCount      int
+	ProxyTypes        []string
+	Lists             []listEntry
+	Loaded            loadedList
+	Interfaces        []netiface.Option
+	SelectedListenIPs map[string]bool
 }
 
 type profileView struct {
@@ -107,8 +108,13 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		cfg := s.snapshot()
+		selected := make(map[string]bool, len(cfg.ListenIPs))
+		for _, ip := range cfg.ListenIPs {
+			selected[ip] = true
+		}
 		s.render(w, r, "settings.html", pageData{
-			Interfaces: netiface.WithCurrent(netiface.List(), cfg.ListenIP),
+			Interfaces:        netiface.WithCurrent(netiface.List(), cfg.ListenIPs),
+			SelectedListenIPs: selected,
 		})
 		return
 	}
@@ -117,9 +123,14 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ip, port := config.NewSettings(r.FormValue("listen_ip"), r.FormValue("listen_port"))
+	if err := r.ParseForm(); err != nil {
+		redirectError(w, r, "/settings", err)
+		return
+	}
+
+	ips, port := config.NewSettings(r.Form["listen_ip"], r.FormValue("listen_port"))
 	if err := s.update(func(cfg *config.Config) error {
-		cfg.ListenIP = ip
+		cfg.ListenIPs = ips
 		cfg.ListenPort = port
 		return nil
 	}); err != nil {

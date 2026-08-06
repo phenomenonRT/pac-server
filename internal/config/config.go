@@ -12,8 +12,9 @@ import (
 )
 
 type Config struct {
-	ListenIP   string `json:"listen_ip"`
-	ListenPort int    `json:"listen_port"`
+	ListenIP   string   `json:"listen_ip,omitempty"`
+	ListenIPs  []string `json:"listen_ips,omitempty"`
+	ListenPort int      `json:"listen_port"`
 
 	ListenAddr string `json:"listen_addr,omitempty"`
 
@@ -75,7 +76,7 @@ func Save(path string, cfg Config) error {
 
 func Default() Config {
 	return Config{
-		ListenIP:   "127.0.0.1",
+		ListenIPs:  []string{"127.0.0.1"},
 		ListenPort: 81,
 		Profiles: []PACProfile{
 			{
@@ -93,12 +94,21 @@ func Default() Config {
 	}
 }
 
-func (cfg Config) Address() string {
-	ip := strings.TrimSpace(cfg.ListenIP)
-	if ip == "" {
-		ip = "127.0.0.1"
+func (cfg Config) Addresses() []string {
+	ips := cfg.ListenIPs
+	if len(ips) == 0 {
+		ips = []string{"127.0.0.1"}
 	}
-	return net.JoinHostPort(ip, strconv.Itoa(cfg.ListenPort))
+
+	addrs := make([]string, 0, len(ips))
+	for _, ip := range ips {
+		addrs = append(addrs, net.JoinHostPort(ip, strconv.Itoa(cfg.ListenPort)))
+	}
+	return addrs
+}
+
+func (cfg Config) Address() string {
+	return strings.Join(cfg.Addresses(), ", ")
 }
 
 func (cfg Config) DefaultProfile() PACProfile {
@@ -136,9 +146,17 @@ func NewProfile(name, slug, proxyType, proxyHost, proxyPort, fallback, directDom
 	}
 }
 
-func NewSettings(listenIP, listenPort string) (string, int) {
+func NewSettings(listenIPs []string, listenPort string) ([]string, int) {
 	port, _ := strconv.Atoi(strings.TrimSpace(listenPort))
-	return strings.TrimSpace(listenIP), port
+
+	ips := make([]string, 0, len(listenIPs))
+	for _, ip := range listenIPs {
+		ip = strings.TrimSpace(ip)
+		if ip != "" {
+			ips = append(ips, ip)
+		}
+	}
+	return ips, port
 }
 
 func NormalizeProxyType(value string) string {
@@ -219,11 +237,26 @@ func applyEnv(cfg *Config) {
 func normalize(cfg *Config) {
 	cfg.ListenIP = strings.TrimSpace(cfg.ListenIP)
 	if cfg.ListenAddr != "" {
-		cfg.ListenIP, cfg.ListenPort = parseListenAddr(cfg.ListenAddr)
+		ip, port := parseListenAddr(cfg.ListenAddr)
+		cfg.ListenIP = ip
+		if cfg.ListenPort == 0 {
+			cfg.ListenPort = port
+		}
 	}
-	if cfg.ListenIP == "" {
-		cfg.ListenIP = "127.0.0.1"
+
+	if len(cfg.ListenIPs) == 0 {
+		if cfg.ListenIP != "" {
+			cfg.ListenIPs = []string{cfg.ListenIP}
+		} else {
+			cfg.ListenIPs = []string{"127.0.0.1"}
+		}
 	}
+	cfg.ListenIPs = cleanIPList(cfg.ListenIPs)
+	if len(cfg.ListenIPs) == 0 {
+		cfg.ListenIPs = []string{"127.0.0.1"}
+	}
+	cfg.ListenIP = ""
+
 	if cfg.ListenPort == 0 {
 		cfg.ListenPort = 81
 	}
@@ -385,6 +418,25 @@ func cleanList(values []string) []string {
 	for _, value := range values {
 		item := strings.ToLower(strings.TrimSpace(value))
 		item = strings.TrimPrefix(item, ".")
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		clean = append(clean, item)
+	}
+
+	return clean
+}
+
+func cleanIPList(values []string) []string {
+	clean := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+
+	for _, value := range values {
+		item := strings.TrimSpace(value)
 		if item == "" {
 			continue
 		}

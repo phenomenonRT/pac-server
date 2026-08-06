@@ -1,0 +1,417 @@
+diff --git a/README.md b/README.md
+index 31de3d0..3d7ef0f 100644
+--- a/README.md
++++ b/README.md
+@@ -82,7 +82,7 @@ Example:
+ 
+ ```json
+ {
+-  "listen_ip": "127.0.0.1",
++  "listen_ips": ["127.0.0.1"],
+   "listen_port": 81,
+   "profiles": [
+     {
+@@ -100,7 +100,7 @@ Example:
+ }
+ ```
+ 
+-Keep `listen_ip` on `127.0.0.1` for local-only access. On a router, use the LAN IP, for example `192.168.1.1`. Do not use `0.0.0.0` unless you intentionally want to listen on every interface.
++Keep `listen_ips` limited to `["127.0.0.1"]` for local-only access. On a router, add the LAN IP too, for example `["127.0.0.1", "192.168.1.1"]`, to reach the UI from both the device and the LAN. Do not add `0.0.0.0` unless you intentionally want to listen on every interface. The server opens one listener per address in `listen_ips`, all serving the same profiles. Old configs with a single `listen_ip` string still load and are migrated automatically. Pick interfaces on the `/settings` page (checkboxes, multiple allowed); changes take effect after a restart.
+ 
+ ## GitHub Releases
+ 
+diff --git a/cmd/pac-server/main.go b/cmd/pac-server/main.go
+index f498795..93a086b 100644
+--- a/cmd/pac-server/main.go
++++ b/cmd/pac-server/main.go
+@@ -4,6 +4,7 @@ import (
+ 	"context"
+ 	"errors"
+ 	"log/slog"
++	"net"
+ 	"net/http"
+ 	"os"
+ 	"os/signal"
+@@ -28,22 +29,46 @@ func main() {
+ 
+ 	app := server.New(cfg, cfgPath, logger)
+ 	httpServer := &http.Server{
+-		Addr:              cfg.Address(),
+ 		Handler:           app.Routes(),
+ 		ReadHeaderTimeout: 5 * time.Second,
+ 	}
+ 
+-	go func() {
+-		logger.Info("pac server started", "addr", cfg.Address(), "pac", "/proxy.pac")
+-		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+-			logger.Error("server stopped", "error", err)
++	addrs := cfg.Addresses()
++	listeners := make([]net.Listener, 0, len(addrs))
++	for _, addr := range addrs {
++		ln, err := net.Listen("tcp", addr)
++		if err != nil {
++			logger.Error("listen", "addr", addr, "error", err)
+ 			os.Exit(1)
+ 		}
+-	}()
++		listeners = append(listeners, ln)
++	}
++
++	serveErrs := make(chan error, len(listeners))
++	for i, ln := range listeners {
++		addr := addrs[i]
++		ln := ln
++		go func() {
++			logger.Info("pac server started", "addr", addr, "pac", "/proxy.pac")
++			if err := httpServer.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
++				serveErrs <- err
++				return
++			}
++			serveErrs <- nil
++		}()
++	}
+ 
+ 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+ 	defer stop()
+-	<-ctx.Done()
++
++	select {
++	case <-ctx.Done():
++	case err := <-serveErrs:
++		if err != nil {
++			logger.Error("server stopped", "error", err)
++			os.Exit(1)
++		}
++	}
+ 
+ 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+ 	defer cancel()
+diff --git a/internal/config/config.go b/internal/config/config.go
+index f73afc8..f7f0a67 100644
+--- a/internal/config/config.go
++++ b/internal/config/config.go
+@@ -12,8 +12,9 @@ import (
+ )
+ 
+ type Config struct {
+-	ListenIP   string `json:"listen_ip"`
+-	ListenPort int    `json:"listen_port"`
++	ListenIP   string   `json:"listen_ip,omitempty"`
++	ListenIPs  []string `json:"listen_ips,omitempty"`
++	ListenPort int      `json:"listen_port"`
+ 
+ 	ListenAddr string `json:"listen_addr,omitempty"`
+ 
+@@ -75,7 +76,7 @@ func Save(path string, cfg Config) error {
+ 
+ func Default() Config {
+ 	return Config{
+-		ListenIP:   "127.0.0.1",
++		ListenIPs:  []string{"127.0.0.1"},
+ 		ListenPort: 81,
+ 		Profiles: []PACProfile{
+ 			{
+@@ -93,12 +94,21 @@ func Default() Config {
+ 	}
+ }
+ 
+-func (cfg Config) Address() string {
+-	ip := strings.TrimSpace(cfg.ListenIP)
+-	if ip == "" {
+-		ip = "127.0.0.1"
++func (cfg Config) Addresses() []string {
++	ips := cfg.ListenIPs
++	if len(ips) == 0 {
++		ips = []string{"127.0.0.1"}
++	}
++
++	addrs := make([]string, 0, len(ips))
++	for _, ip := range ips {
++		addrs = append(addrs, net.JoinHostPort(ip, strconv.Itoa(cfg.ListenPort)))
+ 	}
+-	return net.JoinHostPort(ip, strconv.Itoa(cfg.ListenPort))
++	return addrs
++}
++
++func (cfg Config) Address() string {
++	return strings.Join(cfg.Addresses(), ", ")
+ }
+ 
+ func (cfg Config) DefaultProfile() PACProfile {
+@@ -136,9 +146,17 @@ func NewProfile(name, slug, proxyType, proxyHost, proxyPort, fallback, directDom
+ 	}
+ }
+ 
+-func NewSettings(listenIP, listenPort string) (string, int) {
++func NewSettings(listenIPs []string, listenPort string) ([]string, int) {
+ 	port, _ := strconv.Atoi(strings.TrimSpace(listenPort))
+-	return strings.TrimSpace(listenIP), port
++
++	ips := make([]string, 0, len(listenIPs))
++	for _, ip := range listenIPs {
++		ip = strings.TrimSpace(ip)
++		if ip != "" {
++			ips = append(ips, ip)
++		}
++	}
++	return ips, port
+ }
+ 
+ func NormalizeProxyType(value string) string {
+@@ -219,11 +237,26 @@ func applyEnv(cfg *Config) {
+ func normalize(cfg *Config) {
+ 	cfg.ListenIP = strings.TrimSpace(cfg.ListenIP)
+ 	if cfg.ListenAddr != "" {
+-		cfg.ListenIP, cfg.ListenPort = parseListenAddr(cfg.ListenAddr)
++		ip, port := parseListenAddr(cfg.ListenAddr)
++		cfg.ListenIP = ip
++		if cfg.ListenPort == 0 {
++			cfg.ListenPort = port
++		}
++	}
++
++	if len(cfg.ListenIPs) == 0 {
++		if cfg.ListenIP != "" {
++			cfg.ListenIPs = []string{cfg.ListenIP}
++		} else {
++			cfg.ListenIPs = []string{"127.0.0.1"}
++		}
+ 	}
+-	if cfg.ListenIP == "" {
+-		cfg.ListenIP = "127.0.0.1"
++	cfg.ListenIPs = cleanIPList(cfg.ListenIPs)
++	if len(cfg.ListenIPs) == 0 {
++		cfg.ListenIPs = []string{"127.0.0.1"}
+ 	}
++	cfg.ListenIP = ""
++
+ 	if cfg.ListenPort == 0 {
+ 		cfg.ListenPort = 81
+ 	}
+@@ -397,3 +430,22 @@ func cleanList(values []string) []string {
+ 
+ 	return clean
+ }
++
++func cleanIPList(values []string) []string {
++	clean := make([]string, 0, len(values))
++	seen := make(map[string]struct{}, len(values))
++
++	for _, value := range values {
++		item := strings.TrimSpace(value)
++		if item == "" {
++			continue
++		}
++		if _, ok := seen[item]; ok {
++			continue
++		}
++		seen[item] = struct{}{}
++		clean = append(clean, item)
++	}
++
++	return clean
++}
+diff --git a/internal/netiface/netiface.go b/internal/netiface/netiface.go
+index 5bb8ae0..64f8d8c 100644
+--- a/internal/netiface/netiface.go
++++ b/internal/netiface/netiface.go
+@@ -6,6 +6,7 @@ package netiface
+ import (
+ 	"net"
+ 	"sort"
++	"strings"
+ )
+ 
+ // Option is a single selectable "listen on this address" choice.
+@@ -77,18 +78,29 @@ func List() []Option {
+ // WithCurrent ensures cfgIP is present in the returned options, adding it
+ // (marked as current) when it does not match any detected interface, e.g.
+ // after moving a config file between machines.
+-func WithCurrent(options []Option, cfgIP string) []Option {
++func WithCurrent(options []Option, cfgIPs []string) []Option {
++	have := make(map[string]struct{}, len(options))
+ 	for _, opt := range options {
+-		if opt.IP == cfgIP {
+-			return options
++		have[opt.IP] = struct{}{}
++	}
++
++	missing := make([]Option, 0)
++	for _, cfgIP := range cfgIPs {
++		cfgIP = strings.TrimSpace(cfgIP)
++		if cfgIP == "" {
++			continue
++		}
++		if _, ok := have[cfgIP]; ok {
++			continue
+ 		}
++		have[cfgIP] = struct{}{}
++		missing = append(missing, Option{Label: cfgIP + " (текущий, интерфейс не обнаружен)", IP: cfgIP})
+ 	}
+-	if cfgIP == "" {
++
++	if len(missing) == 0 {
+ 		return options
+ 	}
+-
+-	current := Option{Label: cfgIP + " (текущий, интерфейс не обнаружен)", IP: cfgIP}
+-	return append([]Option{current}, options...)
++	return append(missing, options...)
+ }
+ 
+ func extractIPv4(addr net.Addr) string {
+diff --git a/internal/netiface/netiface_test.go b/internal/netiface/netiface_test.go
+index 03f9323..1f915c9 100644
+--- a/internal/netiface/netiface_test.go
++++ b/internal/netiface/netiface_test.go
+@@ -17,7 +17,7 @@ func TestListAlwaysIncludesAllInterfacesOption(t *testing.T) {
+ }
+ 
+ func TestWithCurrentAddsMissingIP(t *testing.T) {
+-	options := WithCurrent(nil, "10.0.0.5")
++	options := WithCurrent(nil, []string{"10.0.0.5"})
+ 	if len(options) != 1 || options[0].IP != "10.0.0.5" {
+ 		t.Fatalf("WithCurrent() = %#v, want a single 10.0.0.5 option", options)
+ 	}
+@@ -25,7 +25,7 @@ func TestWithCurrentAddsMissingIP(t *testing.T) {
+ 
+ func TestWithCurrentKeepsExistingList(t *testing.T) {
+ 	base := []Option{{Label: "lo (127.0.0.1)", IP: "127.0.0.1"}}
+-	options := WithCurrent(base, "127.0.0.1")
++	options := WithCurrent(base, []string{"127.0.0.1"})
+ 	if len(options) != 1 {
+ 		t.Fatalf("WithCurrent() = %#v, want unchanged single-option list", options)
+ 	}
+diff --git a/internal/server/server.go b/internal/server/server.go
+index 47431a3..7ea6e16 100644
+--- a/internal/server/server.go
++++ b/internal/server/server.go
+@@ -31,16 +31,17 @@ type Server struct {
+ }
+ 
+ type pageData struct {
+-	Config       config.Config
+-	Profiles     []profileView
+-	Error        string
+-	Message      string
+-	DefaultPAC   string
+-	ProfileCount int
+-	ProxyTypes   []string
+-	Lists        []listEntry
+-	Loaded       loadedList
+-	Interfaces   []netiface.Option
++	Config            config.Config
++	Profiles          []profileView
++	Error             string
++	Message           string
++	DefaultPAC        string
++	ProfileCount      int
++	ProxyTypes        []string
++	Lists             []listEntry
++	Loaded            loadedList
++	Interfaces        []netiface.Option
++	SelectedListenIPs map[string]bool
+ }
+ 
+ type profileView struct {
+@@ -107,8 +108,13 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
+ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
+ 	if r.Method == http.MethodGet {
+ 		cfg := s.snapshot()
++		selected := make(map[string]bool, len(cfg.ListenIPs))
++		for _, ip := range cfg.ListenIPs {
++			selected[ip] = true
++		}
+ 		s.render(w, r, "settings.html", pageData{
+-			Interfaces: netiface.WithCurrent(netiface.List(), cfg.ListenIP),
++			Interfaces:        netiface.WithCurrent(netiface.List(), cfg.ListenIPs),
++			SelectedListenIPs: selected,
+ 		})
+ 		return
+ 	}
+@@ -117,9 +123,14 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
+ 		return
+ 	}
+ 
+-	ip, port := config.NewSettings(r.FormValue("listen_ip"), r.FormValue("listen_port"))
++	if err := r.ParseForm(); err != nil {
++		redirectError(w, r, "/settings", err)
++		return
++	}
++
++	ips, port := config.NewSettings(r.Form["listen_ip"], r.FormValue("listen_port"))
+ 	if err := s.update(func(cfg *config.Config) error {
+-		cfg.ListenIP = ip
++		cfg.ListenIPs = ips
+ 		cfg.ListenPort = port
+ 		return nil
+ 	}); err != nil {
+diff --git a/internal/server/web/static/app.css b/internal/server/web/static/app.css
+index 8db8ac5..fca26c6 100644
+--- a/internal/server/web/static/app.css
++++ b/internal/server/web/static/app.css
+@@ -465,6 +465,35 @@ input[readonly] {
+   font-family: var(--mono);
+ }
+ 
++.interface-list {
++  display: flex;
++  flex-direction: column;
++  gap: 8px;
++  margin: 0;
++  padding: 10px 12px;
++  border: 1px solid var(--line);
++  border-radius: 8px;
++}
++
++.interface-list legend {
++  padding: 0 4px;
++  color: var(--muted);
++  font-family: var(--mono);
++  font-size: 10px;
++  text-transform: uppercase;
++}
++
++.checkbox-row {
++  display: flex;
++  align-items: center;
++  gap: 8px;
++}
++
++.checkbox-row input[type="checkbox"] {
++  width: auto;
++  min-height: auto;
++}
++
+ .help {
+   display: inline-grid;
+   width: 16px;
+diff --git a/internal/server/web/templates/settings.html b/internal/server/web/templates/settings.html
+index d2e429a..bba4ba6 100644
+--- a/internal/server/web/templates/settings.html
++++ b/internal/server/web/templates/settings.html
+@@ -19,15 +19,15 @@
+       {{ template "alerts" . }}
+ 
+       <form method="post" action="/settings" class="form-grid compact">
+-        <label>
+-          <span>Сетевой интерфейс <b class="help" title="Список собран автоматически с этого устройства. 127.0.0.1 доступен только с самого устройства. Для роутера обычно нужен LAN-интерфейс, например 192.168.1.1. Не выбирай 0.0.0.0, если не хочешь слушать все интерфейсы, включая WAN.">?</b></span>
+-          <select name="listen_ip" required>
+-            {{ $current := .Config.ListenIP }}
+-            {{ range .Interfaces }}
+-            <option value="{{ .IP }}" {{ if eq .IP $current }}selected{{ end }}>{{ .Label }}</option>
+-            {{ end }}
+-          </select>
+-        </label>
++        <fieldset class="wide interface-list">
++          <legend>Сетевые интерфейсы <b class="help" title="Список собран автоматически с этого устройства. Можно выбрать несколько — сервер откроет отдельный listener на каждом. 127.0.0.1 доступен только с этого устройства. Не выбирай 0.0.0.0, если не хочешь слушать все интерфейсы, включая WAN.">?</b></legend>
++          {{ range .Interfaces }}
++          <label class="checkbox-row">
++            <input type="checkbox" name="listen_ip" value="{{ .IP }}" {{ if index $.SelectedListenIPs .IP }}checked{{ end }}>
++            <span>{{ .Label }}</span>
++          </label>
++          {{ end }}
++        </fieldset>
+         <label>
+           <span>Порт <b class="help" title="Порт веб-интерфейса и PAC-ссылок. Порт 81 на Linux/OpenWrt обычно требует запуск от root.">?</b></span>
+           <input name="listen_port" type="number" min="1" max="65535" value="{{ .Config.ListenPort }}" required>

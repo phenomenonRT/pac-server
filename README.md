@@ -82,7 +82,7 @@ Example:
 
 ```json
 {
-  "listen_ip": "127.0.0.1",
+  "listen_ips": ["127.0.0.1"],
   "listen_port": 81,
   "profiles": [
     {
@@ -100,7 +100,7 @@ Example:
 }
 ```
 
-Keep `listen_ip` on `127.0.0.1` for local-only access. On a router, use the LAN IP, for example `192.168.1.1`. Do not use `0.0.0.0` unless you intentionally want to listen on every interface.
+Keep `listen_ips` limited to `["127.0.0.1"]` for local-only access. On a router, add the LAN IP too, for example `["127.0.0.1", "192.168.1.1"]`, to reach the UI from both the device and the LAN. Do not add `0.0.0.0` unless you intentionally want to listen on every interface. The server opens one listener per address in `listen_ips`, all serving the same profiles. Old configs with a single `listen_ip` string still load and are migrated automatically. Pick interfaces on the `/settings` page (checkboxes, multiple allowed); changes take effect after a restart.
 
 ## GitHub Releases
 
