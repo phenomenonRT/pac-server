@@ -81,7 +81,7 @@ jobs:
           sha256sum dist/pac-server-${{ matrix.name }}.tar.gz > dist/pac-server-${{ matrix.name }}.tar.gz.sha256
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pac-server-${{ matrix.name }}
           path: |
