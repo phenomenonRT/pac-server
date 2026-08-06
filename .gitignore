@@ -2,3 +2,5 @@
 .gocache/
 .run/
 dist/
+*.patch
+deviceproxy.json
