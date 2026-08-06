@@ -76,7 +76,6 @@ func Save(path string, cfg Config) error {
 
 func Default() Config {
 	return Config{
-		ListenIPs:  []string{"127.0.0.1"},
 		ListenPort: 81,
 		Profiles: []PACProfile{
 			{
